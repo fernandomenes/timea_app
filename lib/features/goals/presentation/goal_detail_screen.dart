@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../journal/data/add_journal_entry_sheet.dart';
+import '../../journal/data/edit_journal_entry_sheet.dart';
 import '../../journal/data/journal_local_data_source.dart';
 import '../../journal/domain/journal_entry.dart';
 import '../../timer/data/timer_local_data_source.dart';
@@ -108,6 +109,132 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo guardar el registro: $e')),
+      );
+    }
+  }
+
+  Future<void> _openEditEntrySheet(JournalEntry entry) async {
+    final updated = await showModalBottomSheet<JournalEntry>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => EditJournalEntrySheet(
+        goal: _goal,
+        entry: entry,
+      ),
+    );
+
+    if (updated == null) return;
+
+    try {
+      await _journalDs.updateEntry(updated);
+      if (!mounted) return;
+
+      setState(() {
+        _entries = _entries
+            .map((e) => e.id == updated.id ? updated : e)
+            .toList()
+          ..sort((a, b) {
+            final byDate = b.date.compareTo(a.date);
+            if (byDate != 0) return byDate;
+            return b.id.compareTo(a.id);
+          });
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registro actualizado.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo actualizar el registro: $e')),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteEntry(JournalEntry entry) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar registro'),
+          content: const Text('¿Quieres eliminar este registro?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+
+    try {
+      await _journalDs.deleteEntry(entry.id);
+      if (!mounted) return;
+
+      setState(() {
+        _entries.removeWhere((e) => e.id == entry.id);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registro eliminado.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo eliminar el registro: $e')),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteSession(TimerSession session) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar sesión'),
+          content: const Text('¿Quieres eliminar esta sesión de timer?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+
+    try {
+      await _timerDs.deleteSession(session.id);
+      if (!mounted) return;
+
+      setState(() {
+        _sessions.removeWhere((s) => s.id == session.id);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sesión eliminada.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo eliminar la sesión: $e')),
       );
     }
   }
@@ -639,6 +766,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                                 session: session,
                                 formatDateTime: _formatDateTime,
                                 formatDuration: _formatDuration,
+                                onDelete: () => _confirmDeleteSession(session),
                               ),
                             ),
                           ),
@@ -678,7 +806,11 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                         ..._entries.map(
                           (entry) => Padding(
                             padding: const EdgeInsets.only(bottom: 12),
-                            child: _JournalEntryCard(entry: entry),
+                            child: _JournalEntryCard(
+                              entry: entry,
+                              onEdit: () => _openEditEntrySheet(entry),
+                              onDelete: () => _confirmDeleteEntry(entry),
+                            ),
                           ),
                         ),
                     ],
@@ -693,11 +825,13 @@ class _TimerSessionCard extends StatelessWidget {
     required this.session,
     required this.formatDateTime,
     required this.formatDuration,
+    required this.onDelete,
   });
 
   final TimerSession session;
   final String Function(DateTime) formatDateTime;
   final String Function(int) formatDuration;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -705,22 +839,40 @@ class _TimerSessionCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              formatDuration(session.effectiveSeconds),
-              style: Theme.of(context).textTheme.titleLarge,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    formatDuration(session.effectiveSeconds),
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Inicio: ${formatDateTime(session.startedAt)}',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Fin: ${formatDateTime(session.endedAt)}',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Inicio: ${formatDateTime(session.startedAt)}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Fin: ${formatDateTime(session.endedAt)}',
-              style: Theme.of(context).textTheme.bodyMedium,
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'delete') onDelete();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Eliminar'),
+                ),
+              ],
             ),
           ],
         ),
@@ -732,9 +884,13 @@ class _TimerSessionCard extends StatelessWidget {
 class _JournalEntryCard extends StatelessWidget {
   const _JournalEntryCard({
     required this.entry,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final JournalEntry entry;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   String _formatDate(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');
@@ -756,24 +912,47 @@ class _JournalEntryCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              _formatDate(entry.date),
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            if (metrics.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                metrics.join(' • '),
-                style: Theme.of(context).textTheme.labelLarge,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _formatDate(entry.date),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  if (metrics.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      metrics.join(' • '),
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Text(
+                    entry.text,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                ],
               ),
-            ],
-            const SizedBox(height: 10),
-            Text(
-              entry.text,
-              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'edit') onEdit();
+                if (value == 'delete') onDelete();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Text('Editar'),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Eliminar'),
+                ),
+              ],
             ),
           ],
         ),

@@ -31,6 +31,27 @@ class JournalLocalDataSource {
     );
   }
 
+  Future<void> updateEntry(JournalEntry entry) async {
+    final Database database = await _db.database;
+
+    await database.update(
+      'journal_entries',
+      _toRow(entry),
+      where: 'id = ?',
+      whereArgs: [entry.id],
+    );
+  }
+
+  Future<void> deleteEntry(String id) async {
+    final Database database = await _db.database;
+
+    await database.delete(
+      'journal_entries',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Map<String, Object?> _toRow(JournalEntry entry) {
     return {
       'id': entry.id,
@@ -43,13 +64,15 @@ class JournalLocalDataSource {
   }
 
   JournalEntry _fromRow(Map<String, Object?> row) {
+    final rawMoney = row['money_spent'];
+
     return JournalEntry(
       id: row['id'] as String,
       goalId: row['goal_id'] as String,
       date: DateTime.fromMillisecondsSinceEpoch(row['entry_date_ms'] as int),
       text: row['text'] as String,
       minutesSpent: row['minutes_spent'] as int?,
-      moneySpent: row['money_spent'] as double?,
+      moneySpent: rawMoney == null ? null : (rawMoney as num).toDouble(),
     );
   }
 }

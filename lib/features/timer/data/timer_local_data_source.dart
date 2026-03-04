@@ -31,6 +31,16 @@ class TimerLocalDataSource {
     );
   }
 
+  Future<void> deleteSession(String id) async {
+    final Database database = await _db.database;
+
+    await database.delete(
+      'timer_sessions',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Map<String, Object?> _toRow(TimerSession session) {
     return {
       'id': session.id,
@@ -45,7 +55,8 @@ class TimerLocalDataSource {
     return TimerSession(
       id: row['id'] as String,
       goalId: row['goal_id'] as String,
-      startedAt: DateTime.fromMillisecondsSinceEpoch(row['started_at_ms'] as int),
+      startedAt:
+          DateTime.fromMillisecondsSinceEpoch(row['started_at_ms'] as int),
       endedAt: DateTime.fromMillisecondsSinceEpoch(row['ended_at_ms'] as int),
       effectiveSeconds: row['effective_seconds'] as int,
     );
