@@ -1,17 +1,32 @@
-# timea_app
+@"
+# Timea (Android) — Gestor de inversión consciente (tiempo / recursos)
 
-A new Flutter project.
+Timea es una app Android para metas/hábitos/proyectos enfocada en hacer visible:
+- cuánto tiempo has invertido (días, horas, sesiones)
+- qué recursos has gastado (dinero u otros)
+- y ayudarte a tomar decisiones conscientes (continuar / pausar / extender / cerrar ciclo)
 
-## Getting Started
+## Quick start
+1) Revisar entorno:
+   - `flutter doctor`
+   - `.\scripts\check_env.ps1`
 
-This project is a starting point for a Flutter application.
+2) Correr en Android (emulador encendido):
+   - `flutter devices`
+   - `flutter run -d emulator-5554`
 
-A few resources to get you started if this is your first Flutter project:
+## Estructura
+- `docs/architecture.md`: decisiones de arquitectura y organización
+- `docs/features/*.md`: especificación por feature
+- `ROADMAP.md`: plan por fases
+- `CHANGELOG.md`: cambios por versión
+- `scripts/`: atajos de entorno y ejecución
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Convención de commits
+- `init:` arranque del repo/proyecto
+- `docs:` documentación
+- `feat:` nueva funcionalidad
+- `fix:` bugfix
+- `refactor:` reestructura
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+"@ | Set-Content -Encoding UTF8 README.md
