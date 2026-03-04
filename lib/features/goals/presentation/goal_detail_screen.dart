@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../journal/data/add_journal_entry_sheet.dart';
 import '../../journal/data/journal_local_data_source.dart';
 import '../../journal/domain/journal_entry.dart';
-import '../../journal/data/add_journal_entry_sheet.dart';
 import '../../timer/data/timer_local_data_source.dart';
 import '../../timer/domain/timer_session.dart';
+import '../data/goals_local_data_source.dart';
 import '../domain/goal.dart';
+import 'edit_goal_sheet.dart';
+import 'goal_detail_result.dart';
 
 class GoalDetailScreen extends StatefulWidget {
   const GoalDetailScreen({
@@ -24,6 +27,7 @@ class GoalDetailScreen extends StatefulWidget {
 class _GoalDetailScreenState extends State<GoalDetailScreen> {
   final JournalLocalDataSource _journalDs = JournalLocalDataSource();
   final TimerLocalDataSource _timerDs = TimerLocalDataSource();
+  final GoalsLocalDataSource _goalsDs = GoalsLocalDataSource();
 
   List<JournalEntry> _entries = [];
   List<TimerSession> _sessions = [];
@@ -37,11 +41,15 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
   int _currentElapsedSeconds = 0;
   DateTime? _currentSessionStartedAt;
 
-  Goal get _goal => widget.goal;
+  late Goal _currentGoal;
+  GoalDetailResult? _resultToReturn;
+
+  Goal get _goal => _currentGoal;
 
   @override
   void initState() {
     super.initState();
+    _currentGoal = widget.goal;
     _loadData();
   }
 
@@ -100,6 +108,76 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo guardar el registro: $e')),
+      );
+    }
+  }
+
+  Future<void> _openEditGoalSheet() async {
+    final updated = await showModalBottomSheet<Goal>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => EditGoalSheet(goal: _goal),
+    );
+
+    if (updated == null) return;
+
+    try {
+      await _goalsDs.updateGoal(updated);
+      if (!mounted) return;
+
+      setState(() {
+        _currentGoal = updated;
+        _resultToReturn = GoalDetailResult.updated(updated);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Meta actualizada.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo actualizar: $e')),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteGoal() async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar meta'),
+          content: const Text(
+            'Se eliminará la meta y también sus registros y sesiones. ¿Continuar?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+
+    try {
+      await _goalsDs.deleteGoalCascade(_goal.id);
+      if (!mounted) return;
+
+      Navigator.of(context).pop(GoalDetailResult.deleted(_goal.id));
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo eliminar: $e')),
       );
     }
   }
@@ -283,305 +361,329 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       if (_goal.trackMoney) 'Dinero',
     ];
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detalle de meta'),
-        actions: [
-          IconButton(
-            tooltip: 'Recargar',
-            onPressed: _loadData,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openAddEntrySheet,
-        icon: const Icon(Icons.note_add_outlined),
-        label: const Text('Registro'),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : (_error != null)
-              ? Center(
-                  child: Padding(
+    return WillPopScope(
+      onWillPop: () async {
+        final res = _resultToReturn;
+        if (res != null) {
+          Navigator.of(context).pop(res);
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Detalle de meta'),
+          actions: [
+            IconButton(
+              tooltip: 'Recargar',
+              onPressed: _loadData,
+              icon: const Icon(Icons.refresh),
+            ),
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'edit') _openEditGoalSheet();
+                if (value == 'delete') _confirmDeleteGoal();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Editar')),
+                PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+              ],
+            ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _openAddEntrySheet,
+          icon: const Icon(Icons.note_add_outlined),
+          label: const Text('Registro'),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : (_error != null)
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : ListView(
                     padding: const EdgeInsets.all(16),
-                    child: Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Text(
-                              _goal.icon,
-                              style: const TextStyle(fontSize: 36),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                _goal.title,
-                                style:
-                                    Theme.of(context).textTheme.headlineSmall,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Resumen',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 12),
-                    Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            _InfoRow(
-                              icon: Icons.calendar_today_outlined,
-                              label: 'Fecha de inicio',
-                              value: _formatDate(_goal.startDate),
-                            ),
-                            const SizedBox(height: 12),
-                            _InfoRow(
-                              icon: Icons.hourglass_bottom,
-                              label: 'Días invertidos',
-                              value: '${_goal.daysSinceStart}',
-                            ),
-                            const SizedBox(height: 12),
-                            _InfoRow(
-                              icon: Icons.analytics_outlined,
-                              label: 'Recursos medidos',
-                              value: trackedResources.isEmpty
-                                  ? 'Ninguno'
-                                  : trackedResources.join(' • '),
-                            ),
-                            if (_goal.trackTime &&
-                                _goal.dailyTargetMinutes != null) ...[
-                              const SizedBox(height: 12),
-                              _InfoRow(
-                                icon: Icons.flag_outlined,
-                                label: 'Meta diaria',
-                                value: '${_goal.dailyTargetMinutes} min',
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (_goal.trackTime &&
-                        _goal.dailyTargetMinutes != null) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        'Cumplimiento diario',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 12),
+                    children: [
                       Card(
                         clipBehavior: Clip.antiAlias,
                         child: Padding(
                           padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: Row(
                             children: [
                               Text(
-                                'Hoy llevas $_todayTotalTrackedMinutes min de ${_goal.dailyTargetMinutes} min',
-                                style: Theme.of(context).textTheme.bodyLarge,
+                                _goal.icon,
+                                style: const TextStyle(fontSize: 36),
                               ),
-                              const SizedBox(height: 12),
-                              LinearProgressIndicator(
-                                value: _dailyProgressFraction,
-                                minHeight: 12,
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'Cumplimiento: $_dailyProgressPercent%',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    Text(
-                      'Balance actual',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 12),
-                    Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            _StatTile(
-                              title: 'Tiempo en registros',
-                              value: _goal.trackTime
-                                  ? '$_totalJournalMinutes min'
-                                  : 'No medido',
-                            ),
-                            const SizedBox(height: 12),
-                            _StatTile(
-                              title: 'Tiempo en timer',
-                              value: _goal.trackTime
-                                  ? _formatDuration(_totalTimerSeconds)
-                                  : 'No medido',
-                            ),
-                            const SizedBox(height: 12),
-                            _StatTile(
-                              title: 'Dinero registrado',
-                              value: _goal.trackMoney
-                                  ? '\$${_totalMoney.toStringAsFixed(2)}'
-                                  : 'No medido',
-                            ),
-                            const SizedBox(height: 12),
-                            _StatTile(
-                              title: 'Entradas de diario',
-                              value: '${_entries.length}',
-                            ),
-                            const SizedBox(height: 12),
-                            _StatTile(
-                              title: 'Sesiones timer',
-                              value: '${_sessions.length}',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (_goal.trackTime) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        'Timer',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 12),
-                      Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            children: [
-                              Text(
-                                _formatDuration(_currentElapsedSeconds),
-                                style:
-                                    Theme.of(context).textTheme.headlineMedium,
-                              ),
-                              const SizedBox(height: 16),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  if (!_hasActiveTimer)
-                                    FilledButton.icon(
-                                      onPressed: _startTimer,
-                                      icon: const Icon(Icons.play_arrow),
-                                      label: const Text('Iniciar'),
-                                    ),
-                                  if (_hasActiveTimer && _isTimerRunning)
-                                    OutlinedButton.icon(
-                                      onPressed: _pauseTimer,
-                                      icon: const Icon(Icons.pause),
-                                      label: const Text('Pausar'),
-                                    ),
-                                  if (_hasActiveTimer && !_isTimerRunning)
-                                    OutlinedButton.icon(
-                                      onPressed: _resumeTimer,
-                                      icon: const Icon(Icons.play_arrow),
-                                      label: const Text('Reanudar'),
-                                    ),
-                                  if (_hasActiveTimer)
-                                    FilledButton.icon(
-                                      onPressed: _stopAndSaveTimer,
-                                      icon: const Icon(Icons.stop),
-                                      label: const Text('Detener y guardar'),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Sesiones guardadas',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 12),
-                      if (_sessions.isEmpty)
-                        Card(
-                          clipBehavior: Clip.antiAlias,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              'Todavía no hay sesiones de timer guardadas.',
-                              style: Theme.of(context).textTheme.bodyLarge,
-                            ),
-                          ),
-                        )
-                      else
-                        ..._sessions.map(
-                          (session) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _TimerSessionCard(
-                              session: session,
-                              formatDateTime: _formatDateTime,
-                              formatDuration: _formatDuration,
-                            ),
-                          ),
-                        ),
-                    ],
-                    const SizedBox(height: 16),
-                    Text(
-                      'Registros',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 12),
-                    if (_entries.isEmpty)
-                      Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            children: [
-                              const Text(
-                                'Todavía no hay registros para esta meta.',
-                                style: TextStyle(fontSize: 16),
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: _openAddEntrySheet,
-                                  icon: const Icon(Icons.note_add_outlined),
-                                  label: const Text('Agregar primer registro'),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _goal.title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      )
-                    else
-                      ..._entries.map(
-                        (entry) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _JournalEntryCard(entry: entry),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Resumen',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              _InfoRow(
+                                icon: Icons.calendar_today_outlined,
+                                label: 'Fecha de inicio',
+                                value: _formatDate(_goal.startDate),
+                              ),
+                              const SizedBox(height: 12),
+                              _InfoRow(
+                                icon: Icons.hourglass_bottom,
+                                label: 'Días invertidos',
+                                value: '${_goal.daysSinceStart}',
+                              ),
+                              const SizedBox(height: 12),
+                              _InfoRow(
+                                icon: Icons.analytics_outlined,
+                                label: 'Recursos medidos',
+                                value: trackedResources.isEmpty
+                                    ? 'Ninguno'
+                                    : trackedResources.join(' • '),
+                              ),
+                              if (_goal.trackTime &&
+                                  _goal.dailyTargetMinutes != null) ...[
+                                const SizedBox(height: 12),
+                                _InfoRow(
+                                  icon: Icons.flag_outlined,
+                                  label: 'Meta diaria',
+                                  value: '${_goal.dailyTargetMinutes} min',
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ),
-                  ],
-                ),
+                      if (_goal.trackTime &&
+                          _goal.dailyTargetMinutes != null) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Cumplimiento diario',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 12),
+                        Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Hoy llevas $_todayTotalTrackedMinutes min de ${_goal.dailyTargetMinutes} min',
+                                  style: Theme.of(context).textTheme.bodyLarge,
+                                ),
+                                const SizedBox(height: 12),
+                                LinearProgressIndicator(
+                                  value: _dailyProgressFraction,
+                                  minHeight: 12,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Cumplimiento: $_dailyProgressPercent%',
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Text(
+                        'Balance actual',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              _StatTile(
+                                title: 'Tiempo en registros',
+                                value: _goal.trackTime
+                                    ? '$_totalJournalMinutes min'
+                                    : 'No medido',
+                              ),
+                              const SizedBox(height: 12),
+                              _StatTile(
+                                title: 'Tiempo en timer',
+                                value: _goal.trackTime
+                                    ? _formatDuration(_totalTimerSeconds)
+                                    : 'No medido',
+                              ),
+                              const SizedBox(height: 12),
+                              _StatTile(
+                                title: 'Dinero registrado',
+                                value: _goal.trackMoney
+                                    ? '\$${_totalMoney.toStringAsFixed(2)}'
+                                    : 'No medido',
+                              ),
+                              const SizedBox(height: 12),
+                              _StatTile(
+                                title: 'Entradas de diario',
+                                value: '${_entries.length}',
+                              ),
+                              const SizedBox(height: 12),
+                              _StatTile(
+                                title: 'Sesiones timer',
+                                value: '${_sessions.length}',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (_goal.trackTime) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Timer',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 12),
+                        Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              children: [
+                                Text(
+                                  _formatDuration(_currentElapsedSeconds),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium,
+                                ),
+                                const SizedBox(height: 16),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    if (!_hasActiveTimer)
+                                      FilledButton.icon(
+                                        onPressed: _startTimer,
+                                        icon: const Icon(Icons.play_arrow),
+                                        label: const Text('Iniciar'),
+                                      ),
+                                    if (_hasActiveTimer && _isTimerRunning)
+                                      OutlinedButton.icon(
+                                        onPressed: _pauseTimer,
+                                        icon: const Icon(Icons.pause),
+                                        label: const Text('Pausar'),
+                                      ),
+                                    if (_hasActiveTimer && !_isTimerRunning)
+                                      OutlinedButton.icon(
+                                        onPressed: _resumeTimer,
+                                        icon: const Icon(Icons.play_arrow),
+                                        label: const Text('Reanudar'),
+                                      ),
+                                    if (_hasActiveTimer)
+                                      FilledButton.icon(
+                                        onPressed: _stopAndSaveTimer,
+                                        icon: const Icon(Icons.stop),
+                                        label: const Text('Detener y guardar'),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Sesiones guardadas',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 12),
+                        if (_sessions.isEmpty)
+                          Card(
+                            clipBehavior: Clip.antiAlias,
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                'Todavía no hay sesiones de timer guardadas.',
+                                style: Theme.of(context).textTheme.bodyLarge,
+                              ),
+                            ),
+                          )
+                        else
+                          ..._sessions.map(
+                            (session) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _TimerSessionCard(
+                                session: session,
+                                formatDateTime: _formatDateTime,
+                                formatDuration: _formatDuration,
+                              ),
+                            ),
+                          ),
+                      ],
+                      const SizedBox(height: 16),
+                      Text(
+                        'Registros',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      if (_entries.isEmpty)
+                        Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              children: [
+                                const Text(
+                                  'Todavía no hay registros para esta meta.',
+                                  style: TextStyle(fontSize: 16),
+                                ),
+                                const SizedBox(height: 12),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: _openAddEntrySheet,
+                                    icon: const Icon(Icons.note_add_outlined),
+                                    label:
+                                        const Text('Agregar primer registro'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else
+                        ..._entries.map(
+                          (entry) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _JournalEntryCard(entry: entry),
+                          ),
+                        ),
+                    ],
+                  ),
+      ),
     );
   }
 }
@@ -646,7 +748,8 @@ class _JournalEntryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final metrics = <String>[
       if (entry.minutesSpent != null) '${entry.minutesSpent} min',
-      if (entry.moneySpent != null) '\$${entry.moneySpent!.toStringAsFixed(2)}',
+      if (entry.moneySpent != null)
+        '\$${entry.moneySpent!.toStringAsFixed(2)}',
     ];
 
     return Card(

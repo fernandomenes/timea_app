@@ -29,14 +29,39 @@ class GoalsLocalDataSource {
     );
   }
 
-  Future<void> deleteGoal(String id) async {
+  Future<void> updateGoal(Goal goal) async {
     final Database database = await _db.database;
 
-    await database.delete(
+    await database.update(
       'goals',
+      _toRow(goal),
       where: 'id = ?',
-      whereArgs: [id],
+      whereArgs: [goal.id],
     );
+  }
+
+  Future<void> deleteGoalCascade(String goalId) async {
+    final Database database = await _db.database;
+
+    await database.transaction((txn) async {
+      await txn.delete(
+        'journal_entries',
+        where: 'goal_id = ?',
+        whereArgs: [goalId],
+      );
+
+      await txn.delete(
+        'timer_sessions',
+        where: 'goal_id = ?',
+        whereArgs: [goalId],
+      );
+
+      await txn.delete(
+        'goals',
+        where: 'id = ?',
+        whereArgs: [goalId],
+      );
+    });
   }
 
   Map<String, Object?> _toRow(Goal goal) {
@@ -56,7 +81,8 @@ class GoalsLocalDataSource {
       id: row['id'] as String,
       title: row['title'] as String,
       icon: row['icon'] as String,
-      startDate: DateTime.fromMillisecondsSinceEpoch(row['start_date_ms'] as int),
+      startDate:
+          DateTime.fromMillisecondsSinceEpoch(row['start_date_ms'] as int),
       trackTime: (row['track_time'] as int) == 1,
       trackMoney: (row['track_money'] as int) == 1,
       dailyTargetMinutes: row['daily_target_minutes'] as int?,

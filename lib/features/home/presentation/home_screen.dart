@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../goals/data/goals_local_data_source.dart';
 import '../../goals/domain/goal.dart';
 import '../../goals/presentation/create_goal_sheet.dart';
+import '../../goals/presentation/goal_detail_result.dart';
 import '../../goals/presentation/goal_detail_screen.dart';
 import '../../goals/presentation/widgets/goal_card.dart';
 
@@ -76,12 +77,28 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openGoalDetail(Goal goal) {
-    Navigator.of(context).push(
+  Future<void> _openGoalDetail(Goal goal) async {
+    final result = await Navigator.of(context).push<GoalDetailResult>(
       MaterialPageRoute(
         builder: (_) => GoalDetailScreen(goal: goal),
       ),
     );
+
+    if (result == null) return;
+
+    if (result.deletedGoalId != null) {
+      setState(() {
+        _goals.removeWhere((g) => g.id == result.deletedGoalId);
+      });
+      return;
+    }
+
+    if (result.goal != null) {
+      final updated = result.goal!;
+      setState(() {
+        _goals = _goals.map((g) => g.id == updated.id ? updated : g).toList();
+      });
+    }
   }
 
   @override
@@ -132,7 +149,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       : hasGoals
                           ? ListView.separated(
                               itemCount: _goals.length,
-                              separatorBuilder: (_, _) => const SizedBox(height: 12),
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 12),
                               itemBuilder: (context, index) {
                                 final goal = _goals[index];
 
@@ -148,12 +166,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 padding: const EdgeInsets.all(16),
                                 child: Row(
                                   children: [
-                                    const Text('⏳', style: TextStyle(fontSize: 28)),
+                                    const Text(
+                                      '⏳',
+                                      style: TextStyle(fontSize: 28),
+                                    ),
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Text(
                                         'Todavía no hay metas. Usa el botón "Meta" para crear la primera.',
-                                        style: Theme.of(context).textTheme.titleMedium,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium,
                                       ),
                                     ),
                                   ],
