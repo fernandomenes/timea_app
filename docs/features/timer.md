@@ -1,18 +1,22 @@
-@"
-# Feature: Journal
+# Feature: Timer
 
-Entradas por día asociadas a una meta.
+## Estado actual
+Implementado en versión MVP:
+- iniciar sesión
+- pausar
+- reanudar
+- detener y guardar
+- persistencia local de sesiones completadas
+- historial de sesiones por meta
 
-Modelo inicial:
+## Limitaciones actuales
+- si cierras la app a media sesión, la sesión activa no se recupera
+- no hay notificación persistente todavía
+- no hay temporizador en segundo plano real
+
+## Modelo actual
 - id
 - goalId
-- date (YYYY-MM-DD)
-- text
-- minutesSpent (opcional)
-- moneySpent (opcional)
-
-Listo cuando:
-- Crear/editar entrada
-- Persistencia local ok
-
-"@ | Set-Content -Encoding UTF8 docs\features\journal.md
+- startedAt
+- endedAt
+- effectiveSeconds

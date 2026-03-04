@@ -6,6 +6,7 @@ class Goal {
     required this.startDate,
     required this.trackTime,
     required this.trackMoney,
+    this.dailyTargetMinutes,
   });
 
   final String id;
@@ -14,6 +15,7 @@ class Goal {
   final DateTime startDate;
   final bool trackTime;
   final bool trackMoney;
+  final int? dailyTargetMinutes;
 
   int get daysSinceStart {
     final now = DateTime.now();

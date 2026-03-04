@@ -12,6 +12,7 @@ class CreateGoalSheet extends StatefulWidget {
 class _CreateGoalSheetState extends State<CreateGoalSheet> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
+  final _dailyTargetMinutesController = TextEditingController();
 
   final List<String> _iconOptions = const ['⏳', '📚', '💪', '💸', '🧠', '❤️'];
 
@@ -23,6 +24,7 @@ class _CreateGoalSheetState extends State<CreateGoalSheet> {
   @override
   void dispose() {
     _titleController.dispose();
+    _dailyTargetMinutesController.dispose();
     super.dispose();
   }
 
@@ -47,6 +49,10 @@ class _CreateGoalSheetState extends State<CreateGoalSheet> {
     final isValid = _formKey.currentState?.validate() ?? false;
     if (!isValid) return;
 
+    final targetText = _dailyTargetMinutesController.text.trim();
+    final dailyTargetMinutes =
+        (_trackTime && targetText.isNotEmpty) ? int.tryParse(targetText) : null;
+
     final goal = Goal(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       title: _titleController.text.trim(),
@@ -54,6 +60,7 @@ class _CreateGoalSheetState extends State<CreateGoalSheet> {
       startDate: _selectedDate,
       trackTime: _trackTime,
       trackMoney: _trackMoney,
+      dailyTargetMinutes: dailyTargetMinutes,
     );
 
     Navigator.of(context).pop(goal);
@@ -174,6 +181,10 @@ class _CreateGoalSheetState extends State<CreateGoalSheet> {
                 onChanged: (value) {
                   setState(() {
                     _trackTime = value ?? false;
+
+                    if (!_trackTime) {
+                      _dailyTargetMinutesController.clear();
+                    }
                   });
                 },
                 contentPadding: EdgeInsets.zero,
@@ -191,6 +202,30 @@ class _CreateGoalSheetState extends State<CreateGoalSheet> {
                 title: const Text('Dinero'),
                 controlAffinity: ListTileControlAffinity.leading,
               ),
+              if (_trackTime) ...[
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _dailyTargetMinutesController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Objetivo diario (minutos)',
+                    hintText: 'Ej. 120',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    if (!_trackTime || value == null || value.trim().isEmpty) {
+                      return null;
+                    }
+
+                    final parsed = int.tryParse(value.trim());
+                    if (parsed == null || parsed <= 0) {
+                      return 'Usa un número mayor a 0.';
+                    }
+
+                    return null;
+                  },
+                ),
+              ],
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,

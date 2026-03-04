@@ -199,6 +199,55 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     return _sessions.fold(0, (sum, session) => sum + session.effectiveSeconds);
   }
 
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  int get _todayJournalSeconds {
+    final now = DateTime.now();
+
+    return _entries
+        .where((entry) => _isSameDay(entry.date, now))
+        .fold(0, (sum, entry) => sum + ((entry.minutesSpent ?? 0) * 60));
+  }
+
+  int get _todaySavedTimerSeconds {
+    final now = DateTime.now();
+
+    return _sessions
+        .where((session) => _isSameDay(session.startedAt, now))
+        .fold(0, (sum, session) => sum + session.effectiveSeconds);
+  }
+
+  int get _todayTotalTrackedSeconds {
+    return _todayJournalSeconds +
+        _todaySavedTimerSeconds +
+        (_hasActiveTimer ? _currentElapsedSeconds : 0);
+  }
+
+  int get _todayTotalTrackedMinutes {
+    return (_todayTotalTrackedSeconds / 60).floor();
+  }
+
+  double get _dailyProgressFraction {
+    final targetMinutes = _goal.dailyTargetMinutes;
+    if (!_goal.trackTime || targetMinutes == null || targetMinutes <= 0) {
+      return 0;
+    }
+
+    final targetSeconds = targetMinutes * 60;
+    final fraction = _todayTotalTrackedSeconds / targetSeconds;
+
+    if (fraction < 0) return 0;
+    if (fraction > 1) return 1;
+
+    return fraction;
+  }
+
+  int get _dailyProgressPercent {
+    return (_dailyProgressFraction * 100).round();
+  }
+
   String _formatDate(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');
     final month = date.month.toString().padLeft(2, '0');
@@ -318,10 +367,54 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                                   ? 'Ninguno'
                                   : trackedResources.join(' • '),
                             ),
+                            if (_goal.trackTime &&
+                                _goal.dailyTargetMinutes != null) ...[
+                              const SizedBox(height: 12),
+                              _InfoRow(
+                                icon: Icons.flag_outlined,
+                                label: 'Meta diaria',
+                                value: '${_goal.dailyTargetMinutes} min',
+                              ),
+                            ],
                           ],
                         ),
                       ),
                     ),
+                    if (_goal.trackTime &&
+                        _goal.dailyTargetMinutes != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Cumplimiento diario',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Hoy llevas $_todayTotalTrackedMinutes min de ${_goal.dailyTargetMinutes} min',
+                                style: Theme.of(context).textTheme.bodyLarge,
+                              ),
+                              const SizedBox(height: 12),
+                              LinearProgressIndicator(
+                                value: _dailyProgressFraction,
+                                minHeight: 12,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Cumplimiento: $_dailyProgressPercent%',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     Text(
                       'Balance actual',
@@ -383,9 +476,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                             children: [
                               Text(
                                 _formatDuration(_currentElapsedSeconds),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineMedium,
+                                style:
+                                    Theme.of(context).textTheme.headlineMedium,
                               ),
                               const SizedBox(height: 16),
                               Wrap(

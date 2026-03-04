@@ -22,7 +22,7 @@ class AppDb {
 
     return openDatabase(
       dbPath,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createGoalsTable(db);
         await _createJournalEntriesTable(db);
@@ -36,6 +36,13 @@ class AppDb {
         if (oldVersion < 3) {
           await _createTimerSessionsTable(db);
         }
+
+        if (oldVersion < 4) {
+          await db.execute('''
+            ALTER TABLE goals
+            ADD COLUMN daily_target_minutes INTEGER
+          ''');
+        }
       },
     );
   }
@@ -48,7 +55,8 @@ class AppDb {
         icon TEXT NOT NULL,
         start_date_ms INTEGER NOT NULL,
         track_time INTEGER NOT NULL,
-        track_money INTEGER NOT NULL
+        track_money INTEGER NOT NULL,
+        daily_target_minutes INTEGER
       );
     ''');
   }

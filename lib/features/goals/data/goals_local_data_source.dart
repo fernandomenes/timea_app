@@ -47,6 +47,7 @@ class GoalsLocalDataSource {
       'start_date_ms': goal.startDate.millisecondsSinceEpoch,
       'track_time': goal.trackTime ? 1 : 0,
       'track_money': goal.trackMoney ? 1 : 0,
+      'daily_target_minutes': goal.dailyTargetMinutes,
     };
   }
 
@@ -58,6 +59,7 @@ class GoalsLocalDataSource {
       startDate: DateTime.fromMillisecondsSinceEpoch(row['start_date_ms'] as int),
       trackTime: (row['track_time'] as int) == 1,
       trackMoney: (row['track_money'] as int) == 1,
+      dailyTargetMinutes: row['daily_target_minutes'] as int?,
     );
   }
 }

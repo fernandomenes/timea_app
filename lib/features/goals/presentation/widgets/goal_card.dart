@@ -25,6 +25,8 @@ class GoalCard extends StatelessWidget {
     final labels = <String>[
       if (goal.trackTime) 'Tiempo',
       if (goal.trackMoney) 'Dinero',
+      if (goal.trackTime && goal.dailyTargetMinutes != null)
+        'Meta diaria: ${goal.dailyTargetMinutes} min',
     ];
 
     return Card(
@@ -67,14 +69,11 @@ class GoalCard extends StatelessWidget {
               ),
               if (labels.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: labels
-                      .map(
-                        (label) => Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Chip(label: Text(label)),
-                        ),
-                      )
+                      .map((label) => Chip(label: Text(label)))
                       .toList(),
                 ),
               ],
