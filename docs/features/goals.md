@@ -1,19 +1,23 @@
-@"
 # Feature: Goals
 
-CRUD de metas/hábitos/proyectos.
+## Estado actual
+Implementado en versión inicial en memoria:
+- crear meta
+- listar metas en pantalla principal
+- elegir emoji
+- elegir fecha de inicio
+- marcar si medirá tiempo y/o dinero
 
-Modelo inicial:
+## Pendiente
+- editar meta
+- eliminar meta
+- persistencia local
+- detalle de meta
+
+## Modelo actual
 - id
 - title
-- icon (emoji o asset)
+- icon
 - startDate
-- deadline (opcional)
-- trackTime / trackMoney
-- dailyTargetMinutes (opcional)
-
-Listo cuando:
-- Crear/editar/eliminar funciona
-- Persistencia local ok
-
-"@ | Set-Content -Encoding UTF8 docs\features\goals.md
+- trackTime
+- trackMoney

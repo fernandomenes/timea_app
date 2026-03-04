@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../goals/domain/goal.dart';
 import '../../goals/presentation/create_goal_sheet.dart';
+import '../../goals/presentation/goal_detail_screen.dart';
 import '../../goals/presentation/widgets/goal_card.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -27,6 +28,14 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _goals.insert(0, goal);
     });
+  }
+
+  void _openGoalDetail(Goal goal) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GoalDetailScreen(goal: goal),
+      ),
+    );
   }
 
   @override
@@ -63,10 +72,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemCount: _goals.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
                       itemBuilder: (context, index) {
-                        return GoalCard(goal: _goals[index]);
+                        final goal = _goals[index];
+
+                        return GoalCard(
+                          goal: goal,
+                          onTap: () => _openGoalDetail(goal),
+                        );
                       },
                     )
                   : Card(
+                      clipBehavior: Clip.antiAlias,
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Row(
