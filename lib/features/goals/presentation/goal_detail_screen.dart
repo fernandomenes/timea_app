@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../journal/data/journal_local_data_source.dart';
 import '../../journal/domain/journal_entry.dart';
 import '../../journal/data/add_journal_entry_sheet.dart';
+import '../../timer/data/timer_local_data_source.dart';
+import '../../timer/domain/timer_session.dart';
 import '../domain/goal.dart';
 
 class GoalDetailScreen extends StatefulWidget {
@@ -19,20 +23,35 @@ class GoalDetailScreen extends StatefulWidget {
 
 class _GoalDetailScreenState extends State<GoalDetailScreen> {
   final JournalLocalDataSource _journalDs = JournalLocalDataSource();
+  final TimerLocalDataSource _timerDs = TimerLocalDataSource();
 
   List<JournalEntry> _entries = [];
+  List<TimerSession> _sessions = [];
+
   bool _loading = true;
   String? _error;
+
+  Timer? _ticker;
+  bool _hasActiveTimer = false;
+  bool _isTimerRunning = false;
+  int _currentElapsedSeconds = 0;
+  DateTime? _currentSessionStartedAt;
 
   Goal get _goal => widget.goal;
 
   @override
   void initState() {
     super.initState();
-    _loadEntries();
+    _loadData();
   }
 
-  Future<void> _loadEntries() async {
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
     setState(() {
       _loading = true;
       _error = null;
@@ -40,17 +59,20 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
 
     try {
       final entries = await _journalDs.getEntriesByGoalId(_goal.id);
+      final sessions = await _timerDs.getSessionsByGoalId(_goal.id);
+
       if (!mounted) return;
 
       setState(() {
         _entries = entries;
+        _sessions = sessions;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
-        _error = 'Error cargando registros: $e';
+        _error = 'Error cargando datos: $e';
         _loading = false;
       });
     }
@@ -82,12 +104,99 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     }
   }
 
-  int get _totalMinutes {
+  void _startTimer() {
+    if (_hasActiveTimer) return;
+
+    setState(() {
+      _hasActiveTimer = true;
+      _isTimerRunning = true;
+      _currentElapsedSeconds = 0;
+      _currentSessionStartedAt = DateTime.now();
+    });
+
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_isTimerRunning) return;
+
+      setState(() {
+        _currentElapsedSeconds += 1;
+      });
+    });
+  }
+
+  void _pauseTimer() {
+    if (!_hasActiveTimer || !_isTimerRunning) return;
+
+    _ticker?.cancel();
+
+    setState(() {
+      _isTimerRunning = false;
+    });
+  }
+
+  void _resumeTimer() {
+    if (!_hasActiveTimer || _isTimerRunning) return;
+
+    setState(() {
+      _isTimerRunning = true;
+    });
+
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_isTimerRunning) return;
+
+      setState(() {
+        _currentElapsedSeconds += 1;
+      });
+    });
+  }
+
+  Future<void> _stopAndSaveTimer() async {
+    if (!_hasActiveTimer || _currentSessionStartedAt == null) return;
+
+    _ticker?.cancel();
+
+    final endedAt = DateTime.now();
+    final session = TimerSession(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      goalId: _goal.id,
+      startedAt: _currentSessionStartedAt!,
+      endedAt: endedAt,
+      effectiveSeconds: _currentElapsedSeconds,
+    );
+
+    try {
+      await _timerDs.insertSession(session);
+      if (!mounted) return;
+
+      setState(() {
+        _sessions.insert(0, session);
+        _hasActiveTimer = false;
+        _isTimerRunning = false;
+        _currentElapsedSeconds = 0;
+        _currentSessionStartedAt = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sesión guardada.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar la sesión: $e')),
+      );
+    }
+  }
+
+  int get _totalJournalMinutes {
     return _entries.fold(0, (sum, entry) => sum + (entry.minutesSpent ?? 0));
   }
 
   double get _totalMoney {
     return _entries.fold(0, (sum, entry) => sum + (entry.moneySpent ?? 0));
+  }
+
+  int get _totalTimerSeconds {
+    return _sessions.fold(0, (sum, session) => sum + session.effectiveSeconds);
   }
 
   String _formatDate(DateTime date) {
@@ -96,6 +205,26 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     final year = date.year.toString();
 
     return '$day/$month/$year';
+  }
+
+  String _formatDateTime(DateTime date) {
+    final datePart = _formatDate(date);
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+
+    return '$datePart $hour:$minute';
+  }
+
+  String _formatDuration(int totalSeconds) {
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+
+    final hh = hours.toString().padLeft(2, '0');
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = seconds.toString().padLeft(2, '0');
+
+    return '$hh:$mm:$ss';
   }
 
   @override
@@ -111,7 +240,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         actions: [
           IconButton(
             tooltip: 'Recargar',
-            onPressed: _loadEntries,
+            onPressed: _loadData,
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -206,9 +335,16 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                         child: Column(
                           children: [
                             _StatTile(
-                              title: 'Tiempo registrado',
+                              title: 'Tiempo en registros',
                               value: _goal.trackTime
-                                  ? '$_totalMinutes min'
+                                  ? '$_totalJournalMinutes min'
+                                  : 'No medido',
+                            ),
+                            const SizedBox(height: 12),
+                            _StatTile(
+                              title: 'Tiempo en timer',
+                              value: _goal.trackTime
+                                  ? _formatDuration(_totalTimerSeconds)
                                   : 'No medido',
                             ),
                             const SizedBox(height: 12),
@@ -223,10 +359,98 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                               title: 'Entradas de diario',
                               value: '${_entries.length}',
                             ),
+                            const SizedBox(height: 12),
+                            _StatTile(
+                              title: 'Sesiones timer',
+                              value: '${_sessions.length}',
+                            ),
                           ],
                         ),
                       ),
                     ),
+                    if (_goal.trackTime) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Timer',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              Text(
+                                _formatDuration(_currentElapsedSeconds),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineMedium,
+                              ),
+                              const SizedBox(height: 16),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  if (!_hasActiveTimer)
+                                    FilledButton.icon(
+                                      onPressed: _startTimer,
+                                      icon: const Icon(Icons.play_arrow),
+                                      label: const Text('Iniciar'),
+                                    ),
+                                  if (_hasActiveTimer && _isTimerRunning)
+                                    OutlinedButton.icon(
+                                      onPressed: _pauseTimer,
+                                      icon: const Icon(Icons.pause),
+                                      label: const Text('Pausar'),
+                                    ),
+                                  if (_hasActiveTimer && !_isTimerRunning)
+                                    OutlinedButton.icon(
+                                      onPressed: _resumeTimer,
+                                      icon: const Icon(Icons.play_arrow),
+                                      label: const Text('Reanudar'),
+                                    ),
+                                  if (_hasActiveTimer)
+                                    FilledButton.icon(
+                                      onPressed: _stopAndSaveTimer,
+                                      icon: const Icon(Icons.stop),
+                                      label: const Text('Detener y guardar'),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Sesiones guardadas',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      if (_sessions.isEmpty)
+                        Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              'Todavía no hay sesiones de timer guardadas.',
+                              style: Theme.of(context).textTheme.bodyLarge,
+                            ),
+                          ),
+                        )
+                      else
+                        ..._sessions.map(
+                          (session) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _TimerSessionCard(
+                              session: session,
+                              formatDateTime: _formatDateTime,
+                              formatDuration: _formatDuration,
+                            ),
+                          ),
+                        ),
+                    ],
                     const SizedBox(height: 16),
                     Text(
                       'Registros',
@@ -266,6 +490,47 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                       ),
                   ],
                 ),
+    );
+  }
+}
+
+class _TimerSessionCard extends StatelessWidget {
+  const _TimerSessionCard({
+    required this.session,
+    required this.formatDateTime,
+    required this.formatDuration,
+  });
+
+  final TimerSession session;
+  final String Function(DateTime) formatDateTime;
+  final String Function(int) formatDuration;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              formatDuration(session.effectiveSeconds),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Inicio: ${formatDateTime(session.startedAt)}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Fin: ${formatDateTime(session.endedAt)}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

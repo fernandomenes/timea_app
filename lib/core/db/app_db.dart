@@ -22,14 +22,19 @@ class AppDb {
 
     return openDatabase(
       dbPath,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _createGoalsTable(db);
         await _createJournalEntriesTable(db);
+        await _createTimerSessionsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createJournalEntriesTable(db);
+        }
+
+        if (oldVersion < 3) {
+          await _createTimerSessionsTable(db);
         }
       },
     );
@@ -57,6 +62,18 @@ class AppDb {
         text TEXT NOT NULL,
         minutes_spent INTEGER,
         money_spent REAL
+      );
+    ''');
+  }
+
+  Future<void> _createTimerSessionsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE timer_sessions (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        started_at_ms INTEGER NOT NULL,
+        ended_at_ms INTEGER NOT NULL,
+        effective_seconds INTEGER NOT NULL
       );
     ''');
   }
