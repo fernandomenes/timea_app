@@ -22,19 +22,42 @@ class AppDb {
 
     return openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE goals (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            icon TEXT NOT NULL,
-            start_date_ms INTEGER NOT NULL,
-            track_time INTEGER NOT NULL,
-            track_money INTEGER NOT NULL
-          );
-        ''');
+        await _createGoalsTable(db);
+        await _createJournalEntriesTable(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await _createJournalEntriesTable(db);
+        }
       },
     );
+  }
+
+  Future<void> _createGoalsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        icon TEXT NOT NULL,
+        start_date_ms INTEGER NOT NULL,
+        track_time INTEGER NOT NULL,
+        track_money INTEGER NOT NULL
+      );
+    ''');
+  }
+
+  Future<void> _createJournalEntriesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE journal_entries (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        entry_date_ms INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        minutes_spent INTEGER,
+        money_spent REAL
+      );
+    ''');
   }
 }
