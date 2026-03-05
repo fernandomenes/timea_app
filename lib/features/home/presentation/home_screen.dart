@@ -17,7 +17,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final GoalsLocalDataSource _goalsDs = GoalsLocalDataSource();
   final JournalLocalDataSource _journalDs = JournalLocalDataSource();
   final TimerLocalDataSource _timerDs = TimerLocalDataSource();
@@ -31,7 +31,26 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadGoals();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (!mounted) return;
+
+      setState(() {});
+
+      _syncPinnedNotificationFromHome();
+      _handlePendingNotificationNavigation();
+    }
   }
 
   Future<void> _loadGoals() async {
@@ -49,8 +68,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _loading = false;
       });
 
-      // Si la notificación fue deslizada/eliminada, al abrir la app se re-sincroniza.
       await _syncPinnedNotificationFromHome();
+      _handlePendingNotificationNavigation();
     } catch (e) {
       if (!mounted) return;
 
@@ -65,8 +84,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  Future<({int todayMinutes, int dailyPercent})> _computeTodayStats(Goal goal) async {
-    // Cargamos datos solo para esta meta
+  Future<({int todayMinutes, int dailyPercent})> _computeTodayStats(
+    Goal goal,
+  ) async {
     final entries = await _journalDs.getEntriesByGoalId(goal.id);
     final sessions = await _timerDs.getSessionsByGoalId(goal.id);
 
@@ -98,12 +118,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final pinnedId = _notificationService.pinnedGoalId;
     if (pinnedId == null) return;
 
-    final goal = _goals.where((g) => g.id == pinnedId).cast<Goal?>().firstWhere(
-          (g) => g != null,
-          orElse: () => null,
-        );
+    Goal? goal;
+    for (final item in _goals) {
+      if (item.id == pinnedId) {
+        goal = item;
+        break;
+      }
+    }
 
-    // Si ya no existe (por ejemplo se borró), limpiamos el estado.
     if (goal == null) {
       await _notificationService.cancelPinnedGoalNotification();
       if (!mounted) return;
@@ -111,7 +133,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // Re-mostramos / actualizamos la notificación con datos actuales (por si la deslizaron).
     try {
       final stats = await _computeTodayStats(goal);
       await _notificationService.showPinnedGoalNotification(
@@ -126,8 +147,28 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() {});
     } catch (_) {
-      // MVP: si falla, no rompemos Home.
+      // MVP
     }
+  }
+
+  void _handlePendingNotificationNavigation() {
+    final goalId = _notificationService.consumePendingOpenGoalId();
+    if (goalId == null) return;
+
+    Goal? goal;
+    for (final item in _goals) {
+      if (item.id == goalId) {
+        goal = item;
+        break;
+      }
+    }
+
+    if (goal == null) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _openGoalDetail(goal!);
+    });
   }
 
   Future<void> _pinGoalFromHome(Goal goal) async {
@@ -160,8 +201,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _unpinFromHome() async {
     try {
       await _notificationService.cancelPinnedGoalNotification();
+
       if (!mounted) return;
       setState(() {});
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Notificación retirada.')),
       );
@@ -191,7 +234,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _goals.insert(0, goal);
       });
 
-      // Si hay una meta anclada, refrescamos la notificación por si el usuario lo espera.
       await _syncPinnedNotificationFromHome();
     } catch (e) {
       if (!mounted) return;
@@ -210,8 +252,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (result == null) {
-      // Aún así, si hay una meta anclada, al volver sincronizamos por si cambió algo.
       await _syncPinnedNotificationFromHome();
+      if (!mounted) return;
+      setState(() {});
       return;
     }
 
@@ -221,6 +264,8 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       await _syncPinnedNotificationFromHome();
+      if (!mounted) return;
+      setState(() {});
       return;
     }
 
@@ -231,6 +276,8 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       await _syncPinnedNotificationFromHome();
+      if (!mounted) return;
+      setState(() {});
     }
   }
 
@@ -238,12 +285,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final hasGoals = _goals.isNotEmpty;
     final pinnedId = _notificationService.pinnedGoalId;
-    final pinnedGoal = pinnedId == null
-        ? null
-        : _goals.where((g) => g.id == pinnedId).cast<Goal?>().firstWhere(
-              (g) => g != null,
-              orElse: () => null,
-            );
+
+    Goal? pinnedGoal;
+    if (pinnedId != null) {
+      for (final goal in _goals) {
+        if (goal.id == pinnedId) {
+          pinnedGoal = goal;
+          break;
+        }
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -276,7 +327,6 @@ class _HomeScreenState extends State<HomeScreen> {
               style: Theme.of(context).textTheme.bodyLarge,
             ),
             const SizedBox(height: 12),
-
             if (pinnedGoal != null) ...[
               Card(
                 clipBehavior: Clip.antiAlias,
@@ -295,7 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       TextButton(
-                        onPressed: () => _openGoalDetail(pinnedGoal),
+                        onPressed: () => _openGoalDetail(pinnedGoal!),
                         child: const Text('Ver'),
                       ),
                       const SizedBox(width: 6),
@@ -309,7 +359,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 12),
             ],
-
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -327,7 +376,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   const SizedBox(height: 12),
                               itemBuilder: (context, index) {
                                 final goal = _goals[index];
-                                final isPinned = _notificationService.pinnedGoalId == goal.id;
+                                final isPinned =
+                                    _notificationService.pinnedGoalId == goal.id;
 
                                 return GoalCard(
                                   goal: goal,
