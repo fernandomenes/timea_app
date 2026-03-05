@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/notifications/app_notification_service.dart';
 import '../../goals/data/goals_local_data_source.dart';
 import '../../goals/domain/goal.dart';
 import '../../goals/presentation/create_goal_sheet.dart';
 import '../../goals/presentation/goal_detail_result.dart';
 import '../../goals/presentation/goal_detail_screen.dart';
 import '../../goals/presentation/widgets/goal_card.dart';
+import '../../journal/data/journal_local_data_source.dart';
+import '../../timer/data/timer_local_data_source.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,6 +19,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final GoalsLocalDataSource _goalsDs = GoalsLocalDataSource();
+  final JournalLocalDataSource _journalDs = JournalLocalDataSource();
+  final TimerLocalDataSource _timerDs = TimerLocalDataSource();
+  final AppNotificationService _notificationService =
+      AppNotificationService.instance;
 
   List<Goal> _goals = [];
   bool _loading = true;
@@ -41,6 +48,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _goals = goals;
         _loading = false;
       });
+
+      // Si la notificación fue deslizada/eliminada, al abrir la app se re-sincroniza.
+      await _syncPinnedNotificationFromHome();
     } catch (e) {
       if (!mounted) return;
 
@@ -48,6 +58,118 @@ class _HomeScreenState extends State<HomeScreen> {
         _error = 'Error cargando metas: $e';
         _loading = false;
       });
+    }
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  Future<({int todayMinutes, int dailyPercent})> _computeTodayStats(Goal goal) async {
+    // Cargamos datos solo para esta meta
+    final entries = await _journalDs.getEntriesByGoalId(goal.id);
+    final sessions = await _timerDs.getSessionsByGoalId(goal.id);
+
+    final now = DateTime.now();
+
+    final todayJournalSeconds = entries
+        .where((e) => _isSameDay(e.date, now))
+        .fold<int>(0, (sum, e) => sum + ((e.minutesSpent ?? 0) * 60));
+
+    final todayTimerSeconds = sessions
+        .where((s) => _isSameDay(s.startedAt, now))
+        .fold<int>(0, (sum, s) => sum + s.effectiveSeconds);
+
+    final totalSeconds = todayJournalSeconds + todayTimerSeconds;
+    final todayMinutes = (totalSeconds / 60).floor();
+
+    int percent = 0;
+    final target = goal.dailyTargetMinutes;
+    if (goal.trackTime && target != null && target > 0) {
+      final fraction = totalSeconds / (target * 60);
+      final clamped = fraction.clamp(0, 1);
+      percent = (clamped * 100).round();
+    }
+
+    return (todayMinutes: todayMinutes, dailyPercent: percent);
+  }
+
+  Future<void> _syncPinnedNotificationFromHome() async {
+    final pinnedId = _notificationService.pinnedGoalId;
+    if (pinnedId == null) return;
+
+    final goal = _goals.where((g) => g.id == pinnedId).cast<Goal?>().firstWhere(
+          (g) => g != null,
+          orElse: () => null,
+        );
+
+    // Si ya no existe (por ejemplo se borró), limpiamos el estado.
+    if (goal == null) {
+      await _notificationService.cancelPinnedGoalNotification();
+      if (!mounted) return;
+      setState(() {});
+      return;
+    }
+
+    // Re-mostramos / actualizamos la notificación con datos actuales (por si la deslizaron).
+    try {
+      final stats = await _computeTodayStats(goal);
+      await _notificationService.showPinnedGoalNotification(
+        goalId: goal.id,
+        title: goal.title,
+        icon: goal.icon,
+        todayMinutes: stats.todayMinutes,
+        dailyTargetMinutes: goal.dailyTargetMinutes,
+        dailyProgressPercent: stats.dailyPercent,
+      );
+
+      if (!mounted) return;
+      setState(() {});
+    } catch (_) {
+      // MVP: si falla, no rompemos Home.
+    }
+  }
+
+  Future<void> _pinGoalFromHome(Goal goal) async {
+    try {
+      final stats = await _computeTodayStats(goal);
+
+      await _notificationService.showPinnedGoalNotification(
+        goalId: goal.id,
+        title: goal.title,
+        icon: goal.icon,
+        todayMinutes: stats.todayMinutes,
+        dailyTargetMinutes: goal.dailyTargetMinutes,
+        dailyProgressPercent: stats.dailyPercent,
+      );
+
+      if (!mounted) return;
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Meta anclada: ${goal.title}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo anclar: $e')),
+      );
+    }
+  }
+
+  Future<void> _unpinFromHome() async {
+    try {
+      await _notificationService.cancelPinnedGoalNotification();
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notificación retirada.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo quitar: $e')),
+      );
     }
   }
 
@@ -68,6 +190,9 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _goals.insert(0, goal);
       });
+
+      // Si hay una meta anclada, refrescamos la notificación por si el usuario lo espera.
+      await _syncPinnedNotificationFromHome();
     } catch (e) {
       if (!mounted) return;
 
@@ -84,12 +209,18 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    if (result == null) return;
+    if (result == null) {
+      // Aún así, si hay una meta anclada, al volver sincronizamos por si cambió algo.
+      await _syncPinnedNotificationFromHome();
+      return;
+    }
 
     if (result.deletedGoalId != null) {
       setState(() {
         _goals.removeWhere((g) => g.id == result.deletedGoalId);
       });
+
+      await _syncPinnedNotificationFromHome();
       return;
     }
 
@@ -98,12 +229,21 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _goals = _goals.map((g) => g.id == updated.id ? updated : g).toList();
       });
+
+      await _syncPinnedNotificationFromHome();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final hasGoals = _goals.isNotEmpty;
+    final pinnedId = _notificationService.pinnedGoalId;
+    final pinnedGoal = pinnedId == null
+        ? null
+        : _goals.where((g) => g.id == pinnedId).cast<Goal?>().firstWhere(
+              (g) => g != null,
+              orElse: () => null,
+            );
 
     return Scaffold(
       appBar: AppBar(
@@ -135,7 +275,41 @@ class _HomeScreenState extends State<HomeScreen> {
               'Empieza creando tu primera meta y haz visible el tiempo que inviertes.',
               style: Theme.of(context).textTheme.bodyLarge,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+
+            if (pinnedGoal != null) ...[
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.push_pin),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Meta anclada: ${pinnedGoal.icon} ${pinnedGoal.title}',
+                          style: Theme.of(context).textTheme.titleMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => _openGoalDetail(pinnedGoal),
+                        child: const Text('Ver'),
+                      ),
+                      const SizedBox(width: 6),
+                      OutlinedButton(
+                        onPressed: _unpinFromHome,
+                        child: const Text('Quitar'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -153,10 +327,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                   const SizedBox(height: 12),
                               itemBuilder: (context, index) {
                                 final goal = _goals[index];
+                                final isPinned = _notificationService.pinnedGoalId == goal.id;
 
                                 return GoalCard(
                                   goal: goal,
                                   onTap: () => _openGoalDetail(goal),
+                                  isPinned: isPinned,
+                                  onPin: () => _pinGoalFromHome(goal),
+                                  onUnpin: _unpinFromHome,
                                 );
                               },
                             )
