@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -61,7 +62,7 @@ class AppNotificationService {
         ? 'Hoy: $todayMinutes min • Meta: $dailyTargetMinutes min • Cumplimiento: $dailyProgressPercent%'
         : 'Hoy: $todayMinutes min';
 
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       _channelId,
       _channelName,
       channelDescription: _channelDescription,
@@ -75,17 +76,31 @@ class AppNotificationService {
       channelShowBadge: false,
     );
 
-    const notificationDetails = NotificationDetails(
-      android: androidDetails,
-    );
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
 
-    await _plugin.show(
-      id: _notificationId,
-      title: '$icon $title',
-      body: body,
-      notificationDetails: notificationDetails,
-      payload: goalId,
-    );
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        androidPlugin != null) {
+      await androidPlugin.startForegroundService(
+        id: _notificationId,
+        title: '$icon $title',
+        body: body,
+        notificationDetails: androidDetails,
+        payload: goalId,
+        startType: AndroidServiceStartType.startSticky,
+        foregroundServiceTypes: {
+          AndroidServiceForegroundType.foregroundServiceTypeSpecialUse,
+        },
+      );
+    } else {
+      await _plugin.show(
+        id: _notificationId,
+        title: '$icon $title',
+        body: body,
+        notificationDetails: NotificationDetails(android: androidDetails),
+        payload: goalId,
+      );
+    }
 
     _pinnedGoalId = goalId;
 
@@ -95,6 +110,15 @@ class AppNotificationService {
 
   Future<void> cancelPinnedGoalNotification() async {
     await initialize();
+
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        androidPlugin != null) {
+      await androidPlugin.stopForegroundService();
+    }
+
     await _plugin.cancel(id: _notificationId);
 
     _pinnedGoalId = null;
