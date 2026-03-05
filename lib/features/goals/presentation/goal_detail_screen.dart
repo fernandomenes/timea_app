@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/notifications/app_notification_service.dart';
 import '../../journal/data/add_journal_entry_sheet.dart';
 import '../../journal/data/edit_journal_entry_sheet.dart';
 import '../../journal/data/journal_local_data_source.dart';
@@ -29,6 +30,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
   final JournalLocalDataSource _journalDs = JournalLocalDataSource();
   final TimerLocalDataSource _timerDs = TimerLocalDataSource();
   final GoalsLocalDataSource _goalsDs = GoalsLocalDataSource();
+  final AppNotificationService _notificationService =
+      AppNotificationService.instance;
 
   List<JournalEntry> _entries = [];
   List<TimerSession> _sessions = [];
@@ -46,6 +49,10 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
   GoalDetailResult? _resultToReturn;
 
   Goal get _goal => _currentGoal;
+
+  bool get _isPinnedInNotification {
+    return _notificationService.pinnedGoalId == _goal.id;
+  }
 
   @override
   void initState() {
@@ -77,6 +84,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         _sessions = sessions;
         _loading = false;
       });
+
+      unawaited(_syncPinnedNotificationIfNeeded());
     } catch (e) {
       if (!mounted) return;
 
@@ -84,6 +93,70 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         _error = 'Error cargando datos: $e';
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _pinCurrentGoalNotification() async {
+    try {
+      await _notificationService.showPinnedGoalNotification(
+        goalId: _goal.id,
+        title: _goal.title,
+        icon: _goal.icon,
+        todayMinutes: _todayTotalTrackedMinutes,
+        dailyTargetMinutes: _goal.dailyTargetMinutes,
+        dailyProgressPercent: _dailyProgressPercent,
+      );
+
+      if (!mounted) return;
+
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Meta anclada en notificación.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo mostrar la notificación: $e')),
+      );
+    }
+  }
+
+  Future<void> _unpinCurrentGoalNotification() async {
+    try {
+      await _notificationService.cancelPinnedGoalNotification();
+
+      if (!mounted) return;
+
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notificación retirada.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo quitar la notificación: $e')),
+      );
+    }
+  }
+
+  Future<void> _syncPinnedNotificationIfNeeded() async {
+    if (!_isPinnedInNotification) return;
+
+    try {
+      await _notificationService.showPinnedGoalNotification(
+        goalId: _goal.id,
+        title: _goal.title,
+        icon: _goal.icon,
+        todayMinutes: _todayTotalTrackedMinutes,
+        dailyTargetMinutes: _goal.dailyTargetMinutes,
+        dailyProgressPercent: _dailyProgressPercent,
+      );
+    } catch (_) {
+      // MVP: si falla la actualización, no rompemos la pantalla.
     }
   }
 
@@ -104,6 +177,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       setState(() {
         _entries.insert(0, entry);
       });
+
+      await _syncPinnedNotificationIfNeeded();
     } catch (e) {
       if (!mounted) return;
 
@@ -140,6 +215,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
             return b.id.compareTo(a.id);
           });
       });
+
+      await _syncPinnedNotificationIfNeeded();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Registro actualizado.')),
@@ -184,6 +261,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         _entries.removeWhere((e) => e.id == entry.id);
       });
 
+      await _syncPinnedNotificationIfNeeded();
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Registro eliminado.')),
       );
@@ -227,6 +306,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         _sessions.removeWhere((s) => s.id == session.id);
       });
 
+      await _syncPinnedNotificationIfNeeded();
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sesión eliminada.')),
       );
@@ -257,6 +338,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         _currentGoal = updated;
         _resultToReturn = GoalDetailResult.updated(updated);
       });
+
+      await _syncPinnedNotificationIfNeeded();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Meta actualizada.')),
@@ -296,6 +379,10 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     if (shouldDelete != true) return;
 
     try {
+      if (_isPinnedInNotification) {
+        await _notificationService.cancelPinnedGoalNotification();
+      }
+
       await _goalsDs.deleteGoalCascade(_goal.id);
       if (!mounted) return;
 
@@ -319,6 +406,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       _currentSessionStartedAt = DateTime.now();
     });
 
+    unawaited(_syncPinnedNotificationIfNeeded());
+
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || !_isTimerRunning) return;
 
@@ -336,6 +425,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     setState(() {
       _isTimerRunning = false;
     });
+
+    unawaited(_syncPinnedNotificationIfNeeded());
   }
 
   void _resumeTimer() {
@@ -344,6 +435,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     setState(() {
       _isTimerRunning = true;
     });
+
+    unawaited(_syncPinnedNotificationIfNeeded());
 
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || !_isTimerRunning) return;
@@ -379,6 +472,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         _currentElapsedSeconds = 0;
         _currentSessionStartedAt = null;
       });
+
+      await _syncPinnedNotificationIfNeeded();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sesión guardada.')),
@@ -508,12 +603,28 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
             ),
             PopupMenuButton<String>(
               onSelected: (value) {
+                if (value == 'pin') _pinCurrentGoalNotification();
+                if (value == 'unpin') _unpinCurrentGoalNotification();
                 if (value == 'edit') _openEditGoalSheet();
                 if (value == 'delete') _confirmDeleteGoal();
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'edit', child: Text('Editar')),
-                PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: _isPinnedInNotification ? 'unpin' : 'pin',
+                  child: Text(
+                    _isPinnedInNotification
+                        ? 'Quitar notificación'
+                        : 'Anclar notificación',
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: Text('Editar'),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Eliminar'),
+                ),
               ],
             ),
           ],
